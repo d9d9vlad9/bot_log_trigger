@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.pytest_cache/
+*.coverage
+*.egg-info/
+*.egg
+
+# Virtualenv
+venv/
+env/
+bot_trigger_poe/  # если у тебя так называется локальное env
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Logs
+*.log
+
+# Database
+*.db
+
+# Env files
+.env

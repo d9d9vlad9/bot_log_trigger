@@ -1,0 +1,7 @@
+{
+    "VM_ID": "test_vm",
+    "VM_NAME": "Test VM",
+    "BOT_SERVER_URL": "http://127.0.0.1:8000",
+    "LOG_FILE": "test_log.log",
+    "FETCH_INTERVAL": 10
+}
