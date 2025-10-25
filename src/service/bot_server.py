@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from pydantic import BaseModel
 from aiogram import Bot
 from src.config import settings
@@ -23,8 +23,13 @@ class AlertOut(BaseModel):
     name: str
     pattern: str
 
+def verify_alert_token(token: str | None = Header(default=None, alias="X-Alert-Token")) -> None:
+    expected = settings.ALERT_TOKEN
+    if expected and token != expected:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid alert token")
+
 @api_app.get("/alerts", response_model=list[AlertOut])
-async def get_alerts():
+async def get_alerts(_: None = Depends(verify_alert_token)):
     async with aiosqlite.connect(settings.DB_PATH) as db:
         cursor = await db.execute("SELECT id, name, pattern FROM alerts WHERE enabled = 1")
         rows = await cursor.fetchall()
@@ -32,7 +37,7 @@ async def get_alerts():
     return [{"id": r[0], "name": r[1], "pattern": r[2]} for r in rows]
 
 @api_app.post("/log_alert")
-async def log_alert(alert: LogAlert):
+async def log_alert(alert: LogAlert, _: None = Depends(verify_alert_token)):
     if bot is None:
         logger.error("Bot not initialized. Cannot send alert.")
         return {"error": "Bot not initialized"}, 503

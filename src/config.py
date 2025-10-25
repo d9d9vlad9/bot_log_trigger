@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     # Web server (FastAPI / uvicorn)
     API_HOST: str = Field(default="127.0.0.1")
     API_PORT: int = Field(default=8000)
+    ALERT_TOKEN: str | None = None
 
     class Config:
         env_file = ".env"
