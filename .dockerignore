@@ -1,0 +1,12 @@
+.git
+__pycache__/
+*.py[cod]
+*.log
+alerts.db
+test_log.log
+.venv/
+.env
+.env.*
+Pipfile.lock.bak
+node_modules/
+agent/__pycache__/

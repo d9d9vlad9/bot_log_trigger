@@ -8,6 +8,7 @@ __pycache__/
 *.coverage
 *.egg-info/
 *.egg
+AGENTS.md
 
 # Virtualenv
 venv/

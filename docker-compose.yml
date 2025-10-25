@@ -1,0 +1,18 @@
+version: "3.10"
+
+services:
+  bot_service:
+    build:
+      context: .
+    env_file:
+      - .env
+    environment:
+      DB_PATH: /app/data/alerts.db
+    volumes:
+      - alerts_data:/app/data
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+volumes:
+  alerts_data:
