@@ -1,6 +1,7 @@
+import math
 import re
-from dataclasses import dataclass
-from typing import Dict
+from dataclasses import dataclass, field
+from typing import Dict, List
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -25,19 +26,17 @@ from src.db.db_alerts import (
 
 router = Router()
 
-CANCEL_BUTTON = "❌ Отмена"
-SKIP_BUTTON = "⏭ Пропустить"
-CANCEL_WORD = "отмена"
-SKIP_WORD = "пропустить"
+BACK_BUTTON = "⬅ Назад"
+MAIN_MENU_BUTTON = "🏠 Главное меню"
+PREV_PAGE_BUTTON = "◀️ Предыдущие"
+NEXT_PAGE_BUTTON = "Следующие ▶️"
+LIST_PAGE_SIZE = 6
 
 TOGGLE_ALERT_BUTTON = "🔁 Переключить активность"
-EDIT_LIMIT_BUTTON = "✏️ Лимит событий"
-EDIT_WINDOW_BUTTON = "⏱ Окно наблюдения"
-BACK_TO_ALERTS_BUTTON = "⬅ Назад к списку"
-BACK_TO_ALERT_MENU_BUTTON = "⬅ Назад к действиям"
+EDIT_LIMIT_BUTTON = "✏️ Порог срабатываний"
+EDIT_WINDOW_BUTTON = "⏱ Интервал наблюдения"
 DELETE_ALERT_BUTTON = "🗑 Удалить алерт"
 CONFIRM_DELETE_BUTTON = "✅ Подтвердить удаление"
-CANCEL_DELETE_BUTTON = "↩ Отмена удаления"
 
 
 @dataclass
@@ -61,6 +60,7 @@ class AddAlertSession:
     pattern: str | None = None
     threshold_count: int = 1
     window_seconds: int = 60
+    history: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -72,6 +72,8 @@ class EditAlertSession:
 
 _add_alert_sessions: Dict[int, AddAlertSession] = {}
 _alert_list_cache: Dict[int, Dict[str, AlertRecord]] = {}
+_alert_list_order: Dict[int, List[str]] = {}
+_alert_list_pages: Dict[int, int] = {}
 _alert_edit_sessions: Dict[int, EditAlertSession] = {}
 
 
@@ -99,8 +101,9 @@ async def menu_add_alert(message: Message):
     _alert_list_cache.pop(user_id, None)
     _alert_edit_sessions.pop(user_id, None)
 
-    _add_alert_sessions[user_id] = AddAlertSession(step="name")
-    await _send_step_prompt(message, "Введите название алерта:")
+    session = AddAlertSession(step="name")
+    _add_alert_sessions[user_id] = session
+    await _prompt_add_step(message, session)
 
 
 @router.message(F.text == LIST_ALERTS_BUTTON)
@@ -145,11 +148,19 @@ async def handle_add_alert_step(message: Message):
     user_id = message.from_user.id
     session = _add_alert_sessions[user_id]
     text = (message.text or "").strip()
-    lowered = text.lower()
 
-    if text == CANCEL_BUTTON or lowered.startswith(CANCEL_WORD):
+    if text == MAIN_MENU_BUTTON:
         del _add_alert_sessions[user_id]
-        await message.answer("Создание алерта отменено.", reply_markup=main_menu())
+        await message.answer("Возвращаюсь в главное меню.", reply_markup=main_menu())
+        return
+
+    if text == BACK_BUTTON:
+        if session.history:
+            session.step = session.history.pop()
+            await _prompt_add_step(message, session)
+        else:
+            del _add_alert_sessions[user_id]
+            await message.answer("Возвращаюсь в главное меню.", reply_markup=main_menu())
         return
 
     if session.step == "name":
@@ -160,11 +171,9 @@ async def handle_add_alert_step(message: Message):
             )
             return
         session.name = text
+        session.history.append("name")
         session.step = "pattern"
-        await _send_step_prompt(
-            message,
-            "Введи регулярное выражение (используется модуль re).",
-        )
+        await _prompt_add_step(message, session)
         return
 
     if session.step == "pattern":
@@ -177,54 +186,34 @@ async def handle_add_alert_step(message: Message):
             )
             return
         session.pattern = text
+        session.history.append("pattern")
         session.step = "threshold_count"
-        await _send_step_prompt(
-            message,
-            "Сколько совпадений допускается? (по умолчанию 1)",
-            include_skip=True,
-        )
+        await _prompt_add_step(message, session)
         return
 
     if session.step == "threshold_count":
-        if not text or lowered.startswith(SKIP_WORD) or text == SKIP_BUTTON:
-            session.threshold_count = 1
-        else:
-            value = _parse_int(text)
-            if value is None:
-                await _send_step_prompt(
-                    message,
-                    (
-                        "Лимит событий должен быть положительным целым числом. "
-                        "Введите значение или нажмите «⏭ Пропустить»."
-                    ),
-                    include_skip=True,
-                )
-                return
-            session.threshold_count = value
+        value = _parse_int(text)
+        if value is None:
+            await message.answer(
+                "Лимит событий должен быть положительным целым числом."
+            )
+            await _prompt_add_step(message, session)
+            return
+        session.threshold_count = value
+        session.history.append("threshold_count")
         session.step = "window_seconds"
-        await _send_step_prompt(
-            message,
-            "За какой интервал считаем события? (число секунд или 5m, по умолчанию 60)",
-            include_skip=True,
-        )
+        await _prompt_add_step(message, session)
         return
 
     if session.step == "window_seconds":
-        if not text or lowered.startswith(SKIP_WORD) or text == SKIP_BUTTON:
-            session.window_seconds = 60
-        else:
-            window = _parse_window(text)
-            if window is None:
-                await _send_step_prompt(
-                    message,
-                    (
-                        "Окно указывается целым числом секунд или с суффиксом s/m. "
-                        "Введите значение или нажмите «⏭ Пропустить»."
-                    ),
-                    include_skip=True,
-                )
-                return
-            session.window_seconds = window
+        window = _parse_window(text)
+        if window is None:
+            await message.answer(
+                "Окно указывается целым числом секунд или с суффиксом s/m (например, 300 или 5m)."
+            )
+            await _prompt_add_step(message, session)
+            return
+        session.window_seconds = window
 
         aid = await add_alert(
             settings.DB_PATH,
@@ -252,12 +241,29 @@ async def handle_alert_edit(message: Message):
     user_id = message.from_user.id
     session = _alert_edit_sessions[user_id]
     text = (message.text or "").strip()
-    lowered = text.lower()
 
-    if text == CANCEL_BUTTON or lowered.startswith(CANCEL_WORD):
+    if text == MAIN_MENU_BUTTON:
         _alert_edit_sessions.pop(user_id, None)
         _alert_list_cache.pop(user_id, None)
-        await message.answer("Действие отменено.", reply_markup=main_menu())
+        _alert_list_order.pop(user_id, None)
+        _alert_list_pages.pop(user_id, None)
+        await message.answer("Возвращаюсь в главное меню.", reply_markup=main_menu())
+        return
+
+    if text == BACK_BUTTON:
+        if session.step == "menu":
+            _alert_edit_sessions.pop(user_id, None)
+            await _send_alert_list_page(message, user_id, include_back=False)
+        elif session.step in {"edit_threshold", "edit_window"}:
+            session.step = "menu"
+            await _send_alert_details(message, session.alert)
+        elif session.step == "confirm_delete":
+            session.step = "menu"
+            session.pending_delete = False
+            await _send_alert_details(message, session.alert)
+        else:
+            _alert_edit_sessions.pop(user_id, None)
+            await _send_alert_list_page(message, user_id, include_back=False)
         return
 
     if session.step == "menu":
@@ -297,7 +303,6 @@ async def handle_alert_edit(message: Message):
                     "Новый лимит событий (целое число). "
                     f"Текущее значение: {session.alert.threshold_count}"
                 ),
-                back_button=BACK_TO_ALERT_MENU_BUTTON,
             )
             return
 
@@ -309,7 +314,6 @@ async def handle_alert_edit(message: Message):
                     "Новое окно в секундах или в формате 5m/30s. "
                     f"Текущее значение: {session.alert.threshold_window_seconds} сек."
                 ),
-                back_button=BACK_TO_ALERT_MENU_BUTTON,
             )
             return
 
@@ -320,32 +324,21 @@ async def handle_alert_edit(message: Message):
                 message,
                 f"Удалить алерт '{session.alert.name}'? Это действие необратимо.",
                 confirm_button=CONFIRM_DELETE_BUTTON,
-                back_button=CANCEL_DELETE_BUTTON,
             )
             return
 
-        if text == BACK_TO_ALERTS_BUTTON:
-            _alert_edit_sessions.pop(user_id, None)
-            await _open_alerts_menu(message)
-            return
-
         await message.answer(
-            "Выберите действие из меню или нажмите «⬅ Назад к списку».",
+            "Выберите действие из меню или воспользуйтесь кнопками ниже.",
             reply_markup=_alert_actions_keyboard(),
         )
         return
 
     if session.step == "edit_threshold":
-        if text == BACK_TO_ALERT_MENU_BUTTON:
-            session.step = "menu"
-            await _send_alert_details(message, session.alert)
-            return
         value = _parse_int(text)
         if value is None:
             await _send_step_prompt(
                 message,
-                "Введите положительное целое число или нажмите «⬅ Назад к действиям».",
-                back_button=BACK_TO_ALERT_MENU_BUTTON,
+                "Введите положительное целое число или нажмите «⬅ Назад».",
             )
             return
         updated = await update_alert_thresholds(
@@ -356,7 +349,7 @@ async def handle_alert_edit(message: Message):
         if not updated:
             await message.answer(
                 "Не удалось обновить лимит. Попробуйте позже.",
-                reply_markup=_alert_actions_keyboard(),
+                reply_markup=_alert_actions_keyboard(include_back=True),
             )
             session.step = "menu"
             return
@@ -379,10 +372,6 @@ async def handle_alert_edit(message: Message):
         return
 
     if session.step == "edit_window":
-        if text == BACK_TO_ALERT_MENU_BUTTON:
-            session.step = "menu"
-            await _send_alert_details(message, session.alert)
-            return
         window = _parse_window(text)
         if window is None:
             await _send_step_prompt(
@@ -391,7 +380,6 @@ async def handle_alert_edit(message: Message):
                     "Введите целое число секунд или значение с суффиксом s/m. "
                     "Например: 300 или 5m."
                 ),
-                back_button=BACK_TO_ALERT_MENU_BUTTON,
             )
             return
         updated = await update_alert_thresholds(
@@ -402,7 +390,7 @@ async def handle_alert_edit(message: Message):
         if not updated:
             await message.answer(
                 "Не удалось обновить окно. Попробуйте позже.",
-                reply_markup=_alert_actions_keyboard(),
+                reply_markup=_alert_actions_keyboard(include_back=True),
             )
             session.step = "menu"
             return
@@ -428,16 +416,12 @@ async def handle_alert_edit(message: Message):
         return
 
     if session.step == "confirm_delete":
-        if text == CANCEL_DELETE_BUTTON or lowered.startswith("отмена"):
-            session.step = "menu"
-            session.pending_delete = False
-            await _send_alert_details(message, session.alert)
-            return
-
         if text == CONFIRM_DELETE_BUTTON:
             deleted = await remove_alert(settings.DB_PATH, session.alert.id)
             _alert_edit_sessions.pop(user_id, None)
             _alert_list_cache.pop(user_id, None)
+            _alert_list_order.pop(user_id, None)
+            _alert_list_pages.pop(user_id, None)
             if deleted:
                 await message.answer(
                     f"✅ Алерт '{session.alert.name}' удалён.",
@@ -451,11 +435,8 @@ async def handle_alert_edit(message: Message):
             return
 
         await message.answer(
-            "Нажмите «✅ Подтвердить удаление» или «↩ Отмена удаления».",
-            reply_markup=_step_keyboard(
-                confirm_button=CONFIRM_DELETE_BUTTON,
-                back_button=CANCEL_DELETE_BUTTON,
-            ),
+            "Нажмите «✅ Подтвердить удаление» или используйте кнопку «⬅ Назад».",
+            reply_markup=_navigation_keyboard(confirm_button=CONFIRM_DELETE_BUTTON),
         )
         return
 
@@ -468,27 +449,42 @@ async def handle_alert_list_navigation(message: Message):
     user_id = message.from_user.id
     mapping = _alert_list_cache[user_id]
     text = (message.text or "").strip()
-    lowered = text.lower()
 
-    if text == CANCEL_BUTTON or lowered.startswith(CANCEL_WORD):
+    if text == MAIN_MENU_BUTTON:
         _alert_list_cache.pop(user_id, None)
+        _alert_list_order.pop(user_id, None)
+        _alert_list_pages.pop(user_id, None)
         await message.answer("Возвращаюсь в главное меню.", reply_markup=main_menu())
         return
 
-    if text == BACK_TO_ALERTS_BUTTON:
-        await _open_alerts_menu(message)
+    if text == BACK_BUTTON:
+        await _send_alert_list_page(message, user_id, include_back=False)
+        return
+
+    if text == NEXT_PAGE_BUTTON:
+        labels = _alert_list_order.get(user_id, [])
+        if labels:
+            total_pages = max(1, math.ceil(len(labels) / LIST_PAGE_SIZE))
+            page = min(
+                _alert_list_pages.get(user_id, 0) + 1,
+                total_pages - 1,
+            )
+            _alert_list_pages[user_id] = page
+        await _send_alert_list_page(message, user_id, include_back=False)
+        return
+
+    if text == PREV_PAGE_BUTTON:
+        labels = _alert_list_order.get(user_id, [])
+        if labels:
+            page = max(_alert_list_pages.get(user_id, 0) - 1, 0)
+            _alert_list_pages[user_id] = page
+        await _send_alert_list_page(message, user_id, include_back=False)
         return
 
     record = mapping.get(text)
     if record is None:
-        await message.answer(
-            "Выберите алерт из клавиатуры или нажмите «❌ Отмена».",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=_alert_list_keyboard(mapping),
-                resize_keyboard=True,
-                input_field_placeholder="Выберите алерт…",
-            ),
-        )
+        await message.answer("Не удалось распознать выбор.")
+        await _send_alert_list_page(message, user_id, include_back=False)
         return
 
     _alert_edit_sessions[user_id] = EditAlertSession(alert=record)
@@ -507,17 +503,78 @@ async def _open_alerts_menu(message: Message) -> None:
         return
 
     records = [_row_to_record(row) for row in rows]
-    mapping = {_alert_label(record): record for record in records}
+    labels = [_alert_label(record) for record in records]
+    mapping = dict(zip(labels, records))
     _alert_list_cache[user_id] = mapping
+    _alert_list_order[user_id] = labels
+    _alert_list_pages[user_id] = 0
 
-    text_lines = ["📋 Алерты:"]
-    for record in records:
+    await _send_alert_list_page(message, user_id, include_back=False)
+
+
+async def _prompt_add_step(message: Message, session: AddAlertSession) -> None:
+    prompts: dict[str, str] = {
+        "name": "Введите название алерта.",
+        "pattern": "Введи регулярное выражение (используется модуль re).",
+        "threshold_count": "Введите лимит событий (целое число, например 1).",
+        "window_seconds": "Введите окно (в секундах или формате 5m/30s, например 300).",
+    }
+
+    text = prompts.get(session.step, "Введите значение.")
+
+    if session.step == "name" and session.name:
+        text += f"\nТекущее значение: {session.name}"
+    elif session.step == "pattern" and session.pattern:
+        text += f"\nТекущий шаблон: {session.pattern}"
+    elif session.step == "threshold_count":
+        text += f"\nТекущее значение: {session.threshold_count}"
+    elif session.step == "window_seconds":
+        text += f"\nТекущее значение: {session.window_seconds} сек."
+
+    await _send_step_prompt(
+        message,
+        text,
+        include_back=bool(session.history),
+    )
+
+async def _send_alert_list_page(
+    message: Message,
+    user_id: int,
+    *,
+    include_back: bool,
+) -> None:
+    labels = _alert_list_order.get(user_id, [])
+    mapping = _alert_list_cache.get(user_id, {})
+    if not labels or not mapping:
+        await message.answer("Нет алертов.", reply_markup=main_menu())
+        return
+
+    total_pages = max(1, math.ceil(len(labels) / LIST_PAGE_SIZE))
+    page = _alert_list_pages.get(user_id, 0)
+    if page < 0:
+        page = 0
+    if page > total_pages - 1:
+        page = total_pages - 1
+    _alert_list_pages[user_id] = page
+
+    start = page * LIST_PAGE_SIZE
+    end = start + LIST_PAGE_SIZE
+    page_labels = labels[start:end]
+    page_records = [mapping[label] for label in page_labels]
+
+    text_lines = [f"📋 Алерты (стр. {page + 1}/{total_pages}):"]
+    for record in page_records:
         text_lines.append(_alert_overview_line(record))
     text_lines.append("")
-    text_lines.append("Выберите алерт из клавиатуры или нажмите «❌ Отмена».")
+    text_lines.append("Выберите алерт из клавиатуры или воспользуйтесь кнопками ниже.")
 
     keyboard = ReplyKeyboardMarkup(
-        keyboard=_alert_list_keyboard(mapping),
+        keyboard=_alert_list_keyboard(
+            page_labels,
+            page=page,
+            total_pages=total_pages,
+            include_back=include_back,
+        ),
         resize_keyboard=True,
         input_field_placeholder="Выберите алерт…",
     )
@@ -528,16 +585,15 @@ async def _open_alerts_menu(message: Message) -> None:
 async def _send_step_prompt(
     message: Message,
     text: str,
-    include_skip: bool = False,
-    back_button: str | None = None,
+    *,
     confirm_button: str | None = None,
+    include_back: bool = True,
 ) -> None:
     await message.answer(
         text,
-        reply_markup=_step_keyboard(
-            include_skip=include_skip,
-            back_button=back_button,
+        reply_markup=_navigation_keyboard(
             confirm_button=confirm_button,
+            include_back=include_back,
         ),
     )
 
@@ -553,50 +609,72 @@ async def _send_alert_details(
         text = f"{prefix}\n\n{text}"
     await message.answer(
         text,
-        reply_markup=_alert_actions_keyboard(),
+        reply_markup=_alert_actions_keyboard(include_back=True),
     )
 
 
-def _step_keyboard(
-    include_skip: bool = False,
-    back_button: str | None = None,
+def _navigation_keyboard(
+    *,
     confirm_button: str | None = None,
+    include_back: bool = True,
 ) -> ReplyKeyboardMarkup:
-    row = [KeyboardButton(text=CANCEL_BUTTON)]
-    if include_skip:
-        row.append(KeyboardButton(text=SKIP_BUTTON))
-    keyboard = [row]
+    keyboard: list[list[KeyboardButton]] = []
     if confirm_button:
         keyboard.append([KeyboardButton(text=confirm_button)])
-    if back_button:
-        keyboard.append([KeyboardButton(text=back_button)])
+    nav_row: list[KeyboardButton] = [KeyboardButton(text=MAIN_MENU_BUTTON)]
+    if include_back:
+        nav_row.insert(0, KeyboardButton(text=BACK_BUTTON))
+    keyboard.append(nav_row)
     return ReplyKeyboardMarkup(
         keyboard=keyboard,
-        resize_keyboard=True,
-        input_field_placeholder="Введите значение или отмените",
-    )
-
-
-def _alert_actions_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=TOGGLE_ALERT_BUTTON)],
-            [
-                KeyboardButton(text=EDIT_LIMIT_BUTTON),
-                KeyboardButton(text=EDIT_WINDOW_BUTTON),
-            ],
-            [KeyboardButton(text=DELETE_ALERT_BUTTON)],
-            [KeyboardButton(text=BACK_TO_ALERTS_BUTTON)],
-            [KeyboardButton(text=CANCEL_BUTTON)],
-        ],
         resize_keyboard=True,
         input_field_placeholder="Выберите действие…",
     )
 
 
-def _alert_list_keyboard(mapping: Dict[str, AlertRecord]) -> list[list[KeyboardButton]]:
-    keyboard = [[KeyboardButton(text=label)] for label in mapping.keys()]
-    keyboard.append([KeyboardButton(text=CANCEL_BUTTON)])
+def _alert_actions_keyboard(*, include_back: bool = True) -> ReplyKeyboardMarkup:
+    keyboard: list[list[KeyboardButton]] = [
+        [KeyboardButton(text=TOGGLE_ALERT_BUTTON)],
+        [
+            KeyboardButton(text=EDIT_LIMIT_BUTTON),
+            KeyboardButton(text=EDIT_WINDOW_BUTTON),
+        ],
+        [KeyboardButton(text=DELETE_ALERT_BUTTON)],
+    ]
+
+    nav_row: list[KeyboardButton] = [KeyboardButton(text=MAIN_MENU_BUTTON)]
+    if include_back:
+        nav_row.insert(0, KeyboardButton(text=BACK_BUTTON))
+    keyboard.append(nav_row)
+
+    return ReplyKeyboardMarkup(
+        keyboard=keyboard,
+        resize_keyboard=True,
+        input_field_placeholder="Выберите действие…",
+    )
+
+def _alert_list_keyboard(
+    labels: List[str],
+    *,
+    page: int,
+    total_pages: int,
+    include_back: bool = True,
+) -> list[list[KeyboardButton]]:
+    keyboard = [[KeyboardButton(text=label)] for label in labels]
+
+    nav_buttons: list[KeyboardButton] = []
+    if total_pages > 1:
+        if page > 0:
+            nav_buttons.append(KeyboardButton(text=PREV_PAGE_BUTTON))
+        if page < total_pages - 1:
+            nav_buttons.append(KeyboardButton(text=NEXT_PAGE_BUTTON))
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+
+    nav_row: list[KeyboardButton] = [KeyboardButton(text=MAIN_MENU_BUTTON)]
+    if include_back:
+        nav_row.insert(0, KeyboardButton(text=BACK_BUTTON))
+    keyboard.append(nav_row)
     return keyboard
 
 
