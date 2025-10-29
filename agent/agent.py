@@ -15,7 +15,19 @@ VM_NAME = cfg.get("VM_NAME")
 BOT_SERVER_URL = cfg["BOT_SERVER_URL"]
 ALERTS_URL = f"{BOT_SERVER_URL}/alerts"
 LOG_FILE_TEMPLATE = cfg["LOG_FILE"]
-FETCH_INTERVAL = cfg.get("FETCH_INTERVAL", 60)
+LOG_POLL_INTERVAL = cfg.get("LOG_POLL_INTERVAL", 0.5)
+if LOG_POLL_INTERVAL <= 0:
+    LOG_POLL_INTERVAL = 0.5
+
+if "CONFIG_REFRESH_INTERVAL" in cfg:
+    CONFIG_REFRESH_INTERVAL = cfg["CONFIG_REFRESH_INTERVAL"]
+elif "FETCH_INTERVAL" in cfg:
+    CONFIG_REFRESH_INTERVAL = cfg["FETCH_INTERVAL"]
+else:
+    CONFIG_REFRESH_INTERVAL = 600
+
+if CONFIG_REFRESH_INTERVAL <= 0:
+    CONFIG_REFRESH_INTERVAL = 600
 AUTH_TOKEN = cfg.get("AUTH_TOKEN")
 
 local_alerts = []
@@ -60,13 +72,13 @@ while True:
             time.sleep(1)
             continue
 
-    if time.time() - last_fetch > FETCH_INTERVAL:
+    if time.time() - last_fetch > CONFIG_REFRESH_INTERVAL:
         fetch_alerts()
         last_fetch = time.time()
 
     line = log_file.readline() if log_file else ""
     if not line:
-        time.sleep(0.5)
+        time.sleep(LOG_POLL_INTERVAL)
         continue
 
     for alert in local_alerts:

@@ -23,6 +23,7 @@ bot_trigger_poe/  # если у тебя так называется локал�
 
 # Logs
 *.log
+*.txt
 
 # Database
 *.db

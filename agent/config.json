@@ -3,6 +3,7 @@
     "VM_NAME": "Test VM",
     "BOT_SERVER_URL": "http://127.0.0.1:8000",
     "LOG_FILE": "log_%d-%m-%Y.txt",
-    "FETCH_INTERVAL": 10,
+    "LOG_POLL_INTERVAL": 0.5,
+    "CONFIG_REFRESH_INTERVAL": 10,
     "AUTH_TOKEN": "supersecret-token"
 }

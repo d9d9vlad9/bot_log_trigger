@@ -1,10 +1,21 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+
+ADD_ALERT_BUTTON = "➕ Добавить алерт"
+LIST_ALERTS_BUTTON = "📋 Список алертов"
+PROGRESSIONS_BUTTON = "🗺 Сценарии прогресса"
+AGENT_SETTINGS_BUTTON = "⚙ Настройки агента"
 
 
 def main_menu():
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Добавить алерт", callback_data="menu:add_alert")],
-            [InlineKeyboardButton(text="📋 Список алертов", callback_data="menu:list_alerts")],
-        ]
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=PROGRESSIONS_BUTTON)],
+            [
+                KeyboardButton(text=ADD_ALERT_BUTTON),
+                KeyboardButton(text=LIST_ALERTS_BUTTON),
+            ],
+            [KeyboardButton(text=AGENT_SETTINGS_BUTTON)],
+        ],
+        resize_keyboard=True,
+        input_field_placeholder="Выберите действие…"
     )
