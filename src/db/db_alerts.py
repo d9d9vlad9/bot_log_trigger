@@ -8,14 +8,15 @@ CREATE TABLE IF NOT EXISTS alerts (
     pattern TEXT NOT NULL,
     enabled INTEGER NOT NULL DEFAULT 1,
     threshold_count INTEGER NOT NULL DEFAULT 1,
-    threshold_window_seconds INTEGER NOT NULL DEFAULT 60
+    threshold_window_seconds INTEGER NOT NULL DEFAULT 60,
+    is_scenario_trigger INTEGER NOT NULL DEFAULT 0
 );
 """
 
 async def init_db(path: str):
     async with aiosqlite.connect(path) as db:
         await db.executescript(DB_INIT_SQL)
-        await _ensure_threshold_columns(db)
+        await _ensure_additional_columns(db)
         await db.commit()
 
 async def add_alert(
@@ -23,7 +24,9 @@ async def add_alert(
     name: str,
     pattern: str,
     threshold_count: int = 1,
-    threshold_window_seconds: int = 60
+    threshold_window_seconds: int = 60,
+    *,
+    is_scenario_trigger: bool = False,
 ) -> int:
     async with aiosqlite.connect(path) as db:
         cur = await db.execute(
@@ -33,11 +36,18 @@ async def add_alert(
                 pattern,
                 enabled,
                 threshold_count,
-                threshold_window_seconds
+                threshold_window_seconds,
+                is_scenario_trigger
             )
-            VALUES (?, ?, 1, ?, ?)
+            VALUES (?, ?, 1, ?, ?, ?)
             """,
-            (name, pattern, threshold_count, threshold_window_seconds)
+            (
+                name,
+                pattern,
+                threshold_count,
+                threshold_window_seconds,
+                int(is_scenario_trigger),
+            ),
         )
         await db.commit()
         return cur.lastrowid
@@ -52,7 +62,8 @@ async def list_alerts(path: str):
                 pattern,
                 enabled,
                 threshold_count,
-                threshold_window_seconds
+                threshold_window_seconds,
+                is_scenario_trigger
             FROM alerts
             ORDER BY id
             """
@@ -65,6 +76,23 @@ async def remove_alert(path: str, alert_id: int) -> bool:
         await db.commit()
         return cur.rowcount > 0
 
+async def toggle_alert_scenario_flag(path: str, alert_id: int) -> int | None:
+    async with aiosqlite.connect(path) as db:
+        cur = await db.execute(
+            "SELECT is_scenario_trigger FROM alerts WHERE id = ?",
+            (alert_id,),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            return None
+        new_value = 0 if row[0] else 1
+        await db.execute(
+            "UPDATE alerts SET is_scenario_trigger = ? WHERE id = ?",
+            (new_value, alert_id),
+        )
+        await db.commit()
+        return new_value
+
 async def get_alert(path: str, alert_id: int):
     async with aiosqlite.connect(path) as db:
         cur = await db.execute(
@@ -75,7 +103,8 @@ async def get_alert(path: str, alert_id: int):
                 pattern,
                 enabled,
                 threshold_count,
-                threshold_window_seconds
+                threshold_window_seconds,
+                is_scenario_trigger
             FROM alerts
             WHERE id = ?
             """,
@@ -129,13 +158,14 @@ async def update_alert_thresholds(
         await db.commit()
         return cur.rowcount > 0
 
-async def _ensure_threshold_columns(db: aiosqlite.Connection) -> None:
+async def _ensure_additional_columns(db: aiosqlite.Connection) -> None:
     for column_sql in (
         "ALTER TABLE alerts ADD COLUMN threshold_count INTEGER NOT NULL DEFAULT 1",
         (
             "ALTER TABLE alerts ADD COLUMN "
             "threshold_window_seconds INTEGER NOT NULL DEFAULT 60"
         ),
+        "ALTER TABLE alerts ADD COLUMN is_scenario_trigger INTEGER NOT NULL DEFAULT 0",
     ):
         try:
             await db.execute(column_sql)

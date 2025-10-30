@@ -40,7 +40,10 @@ def request_headers():
 def fetch_alerts():
     global local_alerts
     try:
-        r = requests.get(ALERTS_URL, headers=request_headers())
+        params = {"vm_id": VM_ID}
+        if VM_NAME:
+            params["vm_name"] = VM_NAME
+        r = requests.get(ALERTS_URL, headers=request_headers(), params=params)
         r.raise_for_status()
         alerts = r.json()
         local_alerts = [{"id": a["id"], "name": a["name"], "pattern": re.compile(a["pattern"])} for a in alerts]

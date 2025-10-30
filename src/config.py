@@ -12,6 +12,8 @@ class Settings(BaseSettings):
 
     # Интервалы и логирование
     MONITOR_POLL_SECONDS: float = Field(default=0.5)
+    AGENT_ACTIVE_THRESHOLD_MINUTES: int = Field(default=10)
+    PROGRESS_TIMEOUT_POLL_SECONDS: float = Field(default=30.0)
     LOG_LEVEL: str = Field(default="INFO")
 
     # Web server (FastAPI / uvicorn)
