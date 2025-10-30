@@ -4,8 +4,6 @@ services:
     build:
       context: .
       network: host
-    dns:
-      - 127.0.0.1
     env_file:
       - .env
     environment:
@@ -14,6 +12,8 @@ services:
       - alerts_data:/app/data
     ports:
       - "8000:8000"
+    dns:
+      - 127.0.0.1
     restart: unless-stopped
 
 volumes:
