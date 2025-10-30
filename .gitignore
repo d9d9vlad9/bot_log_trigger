@@ -21,6 +21,9 @@ bot_trigger_poe/  # если у тебя так называется локал�
 *.sublime-project
 *.sublime-workspace
 
+# Docs
+docs/
+
 # Logs
 *.log
 *.txt
